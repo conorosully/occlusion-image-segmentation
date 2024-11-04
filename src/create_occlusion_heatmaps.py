@@ -44,7 +44,9 @@ def main():
         filename="LICS_UNET_12JUL2024.pth")
 
     # Load the model
-    model = torch.load(model_path, weights_only=False)
+    model = torch.load(model_path, 
+                       weights_only=False,
+                       map_location=torch.device('cpu'))
 
     # Set the model to evaluation mode
     device = torch.device(args.device)
