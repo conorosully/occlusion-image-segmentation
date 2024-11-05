@@ -58,7 +58,7 @@ def main():
     model.eval()  
 
     # Sense check model 
-    #test_model(model, lics_dataset, device)
+    test_model(model, lics_dataset, device)
 
     # Run the occlusion experiment
     do_occlusion_experiment(model, lics_dataset, device, args)
