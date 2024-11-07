@@ -177,12 +177,28 @@ def do_occlusion_experiment(model, dataset, device, args):
         if args.test:
             break
 
-def get_random_pixels(mask, n_pixels):
-    """Get random pixels from a binary mask"""
-    pixels = np.argwhere(mask)
-    pixels = random.sample(list(pixels), n_pixels)
 
-    return pixels
+def get_random_pixels(mask, n_pixels):
+    """Get random pixels from a binary mask.
+    
+    Args:
+        mask (np.ndarray): A binary mask.
+        n_pixels (int): Number of random pixels to retrieve.
+        
+    Returns:
+        list: List of pixel coordinates, empty if no pixels are found.
+    """
+    pixels = np.argwhere(mask)
+    
+    # Return an empty list if there are no pixels in the mask
+    if len(pixels) == 0:
+        return []
+
+    # If there are fewer pixels than requested, return all of them
+    if len(pixels) < n_pixels:
+        n_pixels = len(pixels)
+
+    return random.sample(list(pixels), n_pixels)
 
 def mask_from_pixel(mask, pixel):
     """Create a mask from a single pixel"""
