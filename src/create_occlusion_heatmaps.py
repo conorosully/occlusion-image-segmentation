@@ -115,6 +115,9 @@ def do_occlusion_experiment(model, dataset, device, args):
     print("Number of pixels: {}".format(n_pixels))
 
     for i in tqdm(range(n)):
+
+        print(i,name)
+
         bands, target, edge = dataset.__getitem__(i)
         name = dataset.__getname__(i)
         name = name.split(".")[0]
@@ -134,6 +137,8 @@ def do_occlusion_experiment(model, dataset, device, args):
         coastline_pixels = get_random_pixels(coastline_mask, n_pixels)
         fp_pixels = get_random_pixels(fp_mask, n_pixels)
         fn_pixels = get_random_pixels(fn_mask, n_pixels)
+
+        print("Pixels: ", len(water_pixels), len(land_pixels), len(coastline_pixels), len(fp_pixels), len(fn_pixels))
 
         # Do occlusion for masks
         map_water = generate_occlusion_map(model, device, bands, mask=water_mask, patch_size=patch_size, stride=stride)
@@ -173,7 +178,6 @@ def do_occlusion_experiment(model, dataset, device, args):
             map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
             np.save(args.save_path + f"/{name}_pixel_fn_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy", map)
 
-        print(i,name)
         if args.test:
             break
 
