@@ -116,11 +116,10 @@ def do_occlusion_experiment(model, dataset, device, args):
 
     for i in tqdm(range(n)):
 
-        print(i,name)
-
         bands, target, edge = dataset.__getitem__(i)
         name = dataset.__getname__(i)
         name = name.split(".")[0]
+        print(i,name)
 
         pred = get_predicted_mask(model, device, bands)
         water_mask = target[1].numpy()
