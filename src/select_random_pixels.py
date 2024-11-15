@@ -12,7 +12,7 @@ from huggingface_hub import hf_hub_download
 
 import network
 from datasets import SegmentationDataset
-import pickle
+import json
 
 import utils
 
@@ -90,9 +90,9 @@ def save_pixel_list(model, dataset, device, args):
         fn_pixels = get_random_pixels(fn_mask, n_pixels)
 
         pixel_list[name]={"water":water_pixels, "land":land_pixels, "coastline":coastline_pixels, "fp":fp_pixels, "fn":fn_pixels}
-    
+        
     # Save the pixel list
-    pickle.dump(pixel_list, open("pixels.pkl", "wb"))
+    json.dump(pixel_list, open("pixels.json", "w"))
 
 
 def get_random_pixels(mask, n_pixels):
@@ -115,10 +115,10 @@ def get_random_pixels(mask, n_pixels):
     if len(pixels) < n_pixels:
         n_pixels = len(pixels)
 
-    return random.sample(list(pixels), n_pixels)
+    sample = random.sample(list(pixels), n_pixels)
+    sample = [(int(p[0]), int(p[1])) for p in sample] # Convert to int
 
-
-
+    return sample
 
 
 if __name__ == "__main__":

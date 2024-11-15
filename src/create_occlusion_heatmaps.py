@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import random
 import glob
 from tqdm import tqdm
-import pickle
+import json
 import os
 
 from copy import deepcopy
@@ -58,7 +58,7 @@ def main():
     model.eval()  
 
     # load pixel list
-    pixel_list = pickle.load(open("pixels.pkl", "rb"))
+    pixel_list = json.load(open("pixels.json"))
 
     # Sense check model 
     #utils.test_model(model, lics_dataset, device)
