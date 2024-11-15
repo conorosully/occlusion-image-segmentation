@@ -13,6 +13,8 @@ from skimage.segmentation import felzenszwalb, slic, quickshift, watershed
 
 from skimage.filters import threshold_otsu
 
+from torch.utils.data import DataLoader
+
 base_path = "../data/"
 save_path = "/Users/conorosullivan/Google Drive/My Drive/UCD/research/Journal Paper 2 - superpixels/figures/"
 
@@ -76,3 +78,42 @@ def get_rgb(img, bands=['red','green',"blue"],satellite ='landsat', contrast=1):
     rgb = rgb.transpose(1,2,0)
 
     return rgb
+
+
+def test_model(model, dataset, device):
+    print("Testing model on dataset")
+    print("# Instances: {}".format(dataset.__len__()))
+
+    # Calculate the accuracy of the model on the dataset
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+
+    accuracy_list = []
+    for bands, target, edge in iter(dataloader):
+
+         # Get the water mask 
+        target = target.squeeze()
+        target_water = np.argmax(target, axis=0)
+        
+        # Get the predicted mask
+        output = get_predicted_mask(model, device, bands)
+
+        accuracy = np.mean(np.asarray(target_water == output))
+        accuracy_list.append(accuracy)
+
+    print("Mean accuracy: {:.3f}".format(np.mean(accuracy_list)))
+
+def get_predicted_mask(model,device, bands):
+
+    """Get the predicted mask from the model"""
+
+    if len(bands.shape) == 3:
+        bands = bands.unsqueeze(0)
+
+    input = bands.to(device)
+    output = model(input)
+
+    # Get the predicted water mask
+    output = output.cpu().detach().numpy().squeeze()
+    output = np.argmax(output, axis=0)
+
+    return output

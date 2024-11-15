@@ -5,13 +5,14 @@ import matplotlib.pyplot as plt
 import random
 import glob
 from tqdm import tqdm
+import pickle
+import os
 
 from copy import deepcopy
 
 import torch
 from torch.utils.data import DataLoader
 
-from skimage.segmentation import felzenszwalb, slic, quickshift, watershed
 
 from huggingface_hub import hf_hub_download
 
@@ -27,7 +28,6 @@ def main():
 
     parser.add_argument("--patch_size",type=int,default=8,help="Patch size for occlusion",)
     parser.add_argument("--stride",type=int,default=1,help="Stride for occlusion",)
-    parser.add_argument("--n_pixels",type=int,default=10,help="Number of pixels to sample",)
 
     parser.add_argument("--data_path",type=str,default="../../data/LICS/test",help="Path to the training data",)
     parser.add_argument("--save_path",type=str,default="../maps",help="Path template for saving the model",)
@@ -57,71 +57,39 @@ def main():
     model.to(device)
     model.eval()  
 
+    # load pixel list
+    pixel_list = pickle.load(open("pixels.pkl", "rb"))
+
     # Sense check model 
-    test_model(model, lics_dataset, device)
+    #utils.test_model(model, lics_dataset, device)
 
     # Run the occlusion experiment
-    do_occlusion_experiment(model, lics_dataset, device, args)
+    do_occlusion_experiment(model, lics_dataset, pixel_list, device, args)
 
-def get_predicted_mask(model,device, bands):
 
-    """Get the predicted mask from the model"""
-
-    if len(bands.shape) == 3:
-        bands = bands.unsqueeze(0)
-
-    input = bands.to(device)
-    output = model(input)
-
-    # Get the predicted water mask
-    output = output.cpu().detach().numpy().squeeze()
-    output = np.argmax(output, axis=0)
-
-    return output
-
-def test_model(model, dataset, device):
-    print("Testing model on dataset")
-    print("# Instances: {}".format(dataset.__len__()))
-
-    # Calculate the accuracy of the model on the dataset
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-
-    accuracy_list = []
-    for bands, target, edge in iter(dataloader):
-
-         # Get the water mask 
-        target = target.squeeze()
-        target_water = np.argmax(target, axis=0)
-        
-        # Get the predicted mask
-        output = get_predicted_mask(model, device, bands)
-
-        accuracy = np.mean(np.asarray(target_water == output))
-        accuracy_list.append(accuracy)
-
-    print("Mean accuracy: {:.3f}".format(np.mean(accuracy_list)))
-
-def do_occlusion_experiment(model, dataset, device, args):
+def do_occlusion_experiment(model, dataset, pixel_list, device, args):
 
     patch_size = args.patch_size
     stride = args.stride
-    n_pixels = args.n_pixels
     n = dataset.__len__()
+
+    # Load list of maps already created
+    maps = glob.glob(args.save_path + "/*")
+    maps = [m.split("/")[-1] for m in maps]
 
     print("\nRunning occlusion experiment")
     print("# Instances: {}".format(n))
     print("Patch size: {}".format(patch_size))
     print("Stride: {}".format(stride))
-    print("Number of pixels: {}".format(n_pixels))
+    print("Number of maps: {}".format(len(maps)))
 
-    for i in tqdm(range(n)):
+    for i in range(n):
 
         bands, target, edge = dataset.__getitem__(i)
         name = dataset.__getname__(i)
         name = name.split(".")[0]
-        print(i,name)
-
-        pred = get_predicted_mask(model, device, bands)
+        
+        pred = utils.get_predicted_mask(model, device, bands)
         water_mask = target[1].numpy()
         land_mask = target[0].numpy()
         coastline_mask = edge.numpy()
@@ -131,77 +99,40 @@ def do_occlusion_experiment(model, dataset, device, args):
         fn_mask = np.logical_and(water_mask, np.logical_not(pred)) # predicted land, actual water
         
         # Get random pixels
-        water_pixels = get_random_pixels(water_mask, n_pixels)
-        land_pixels = get_random_pixels(land_mask, n_pixels)
-        coastline_pixels = get_random_pixels(coastline_mask, n_pixels)
-        fp_pixels = get_random_pixels(fp_mask, n_pixels)
-        fn_pixels = get_random_pixels(fn_mask, n_pixels)
+        water_pixels = pixel_list[name]["water"]
+        land_pixels = pixel_list[name]["land"]
+        coastline_pixels = pixel_list[name]["coastline"]
+        fp_pixels = pixel_list[name]["fp"]
+        fn_pixels = pixel_list[name]["fn"]
 
-        print("Pixels: ", len(water_pixels), len(land_pixels), len(coastline_pixels), len(fp_pixels), len(fn_pixels))
+        print(i,name,len(water_pixels),len(land_pixels),len(coastline_pixels),len(fp_pixels),len(fn_pixels))
 
         # Do occlusion for masks
-        map_water = generate_occlusion_map(model, device, bands, mask=water_mask, patch_size=patch_size, stride=stride)
-        np.save(args.save_path + f"/{name}_mask_water_{patch_size}_{stride}.npy", map_water)
-        map_land = generate_occlusion_map(model, device, bands, mask=land_mask, patch_size=patch_size, stride=stride)
-        np.save(args.save_path + f"/{name}_mask_land_{patch_size}_{stride}.npy", map_land)
-        map_coastline = generate_occlusion_map(model, device, bands, mask=coastline_mask, patch_size=patch_size, stride=stride)
-        np.save(args.save_path + f"/{name}_mask_coastline_{patch_size}_{stride}.npy", map_coastline)
-        map_fp = generate_occlusion_map(model, device, bands, mask=fp_mask, patch_size=patch_size, stride=stride)
-        np.save(args.save_path + f"/{name}_mask_fp_{patch_size}_{stride}.npy", map_fp)
-        map_fn = generate_occlusion_map(model, device, bands, mask=fn_mask, patch_size=patch_size, stride=stride)
-        np.save(args.save_path + f"/{name}_mask_fn_{patch_size}_{stride}.npy", map_fn)
+        masks = [water_mask, land_mask, coastline_mask, fp_mask, fn_mask]
+        pixel_lists = [water_pixels, land_pixels, coastline_pixels, fp_pixels, fn_pixels]
+        types = ["water", "land", "coastline", "fp", "fn"]
+
+        for mask, mask_type in tqdm(zip(masks, types)):
+            save_name = f"{name}_mask_{mask_type}_{patch_size}_{stride}.npy"
+            if save_name in maps:
+                continue
+
+            map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
+            np.save(os.path.join(args.save_path, save_name), map)
 
         # Do occlusion for pixels
-        for pixel in water_pixels:
-            mask = mask_from_pixel(water_mask, pixel)
-            map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
-            np.save(args.save_path + f"/{name}_pixel_water_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy", map)
+        for pixel_list, pixel_type in tqdm(zip(pixel_lists, types)):
+            for pixel in pixel_list:
+                save_name = f"{name}_pixel_{pixel_type}_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy"
+                if save_name in maps:
+                    continue
 
-        for pixel in land_pixels:
-            mask = mask_from_pixel(land_mask, pixel)
-            map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
-            np.save(args.save_path + f"/{name}_pixel_land_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy", map)
-
-        for pixel in coastline_pixels:
-            mask = mask_from_pixel(coastline_mask, pixel)
-            map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
-            np.save(args.save_path + f"/{name}_pixel_coastline_pixel_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy", map)
-
-        for pixel in fp_pixels:
-            mask = mask_from_pixel(fp_mask, pixel)
-            map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
-            np.save(args.save_path + f"/{name}_pixel_fp_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy", map)
-        
-        for pixel in fn_pixels:
-            mask = mask_from_pixel(fn_mask, pixel)
-            map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
-            np.save(args.save_path + f"/{name}_pixel_fn_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy", map)
+                mask = mask_from_pixel(water_mask, pixel) # only the dimensions of mask matter
+                map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
+                np.save(os.path.join(args.save_path, save_name), map)
 
         if args.test:
             break
-
-
-def get_random_pixels(mask, n_pixels):
-    """Get random pixels from a binary mask.
-    
-    Args:
-        mask (np.ndarray): A binary mask.
-        n_pixels (int): Number of random pixels to retrieve.
-        
-    Returns:
-        list: List of pixel coordinates, empty if no pixels are found.
-    """
-    pixels = np.argwhere(mask)
-    
-    # Return an empty list if there are no pixels in the mask
-    if len(pixels) == 0:
-        return []
-
-    # If there are fewer pixels than requested, return all of them
-    if len(pixels) < n_pixels:
-        n_pixels = len(pixels)
-
-    return random.sample(list(pixels), n_pixels)
 
 def mask_from_pixel(mask, pixel):
     """Create a mask from a single pixel"""
