@@ -58,16 +58,16 @@ def main():
     model.eval()  
 
     # load pixel list
-    pixel_list = json.load(open("pixels.json"))
+    pixel_dict = json.load(open("pixels.json"))
 
     # Sense check model 
     #utils.test_model(model, lics_dataset, device)
 
     # Run the occlusion experiment
-    do_occlusion_experiment(model, lics_dataset, pixel_list, device, args)
+    do_occlusion_experiment(model, lics_dataset, pixel_dict, device, args)
 
 
-def do_occlusion_experiment(model, dataset, pixel_list, device, args):
+def do_occlusion_experiment(model, dataset, pixel_dict, device, args):
 
     patch_size = args.patch_size
     stride = args.stride
@@ -99,11 +99,11 @@ def do_occlusion_experiment(model, dataset, pixel_list, device, args):
         fn_mask = np.logical_and(water_mask, np.logical_not(pred)) # predicted land, actual water
         
         # Get random pixels
-        water_pixels = pixel_list[name]["water"]
-        land_pixels = pixel_list[name]["land"]
-        coastline_pixels = pixel_list[name]["coastline"]
-        fp_pixels = pixel_list[name]["fp"]
-        fn_pixels = pixel_list[name]["fn"]
+        water_pixels = pixel_dict[name]["water"]
+        land_pixels = pixel_dict[name]["land"]
+        coastline_pixels = pixel_dict[name]["coastline"]
+        fp_pixels = pixel_dict[name]["fp"]
+        fn_pixels = pixel_dict[name]["fn"]
 
         print(i,name,len(water_pixels),len(land_pixels),len(coastline_pixels),len(fp_pixels),len(fn_pixels))
 
