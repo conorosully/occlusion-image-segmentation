@@ -67,6 +67,19 @@ def main():
     do_occlusion_experiment(model, lics_dataset, pixel_dict, device, args)
 
 
+def check_map_exists(maps,name,mask_type, pixel_type, patch_size, stride, pixel=None):
+
+    if mask_type == "mask":
+        save_name = f"{name}_{mask_type}_{pixel_type}_{patch_size}_{stride}.npy"
+    elif mask_type == "pixel":
+        save_name = f"{name}_{mask_type}_{pixel_type}_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy"
+
+    if save_name in maps:
+        return True
+
+    return False
+
+
 def do_occlusion_experiment(model, dataset, pixel_dict, device, args):
 
     patch_size = args.patch_size
@@ -74,14 +87,14 @@ def do_occlusion_experiment(model, dataset, pixel_dict, device, args):
     n = dataset.__len__()
 
     # Load list of maps already created
-    maps = glob.glob(args.save_path + "/*")
-    maps = [m.split("/")[-1] for m in maps]
+    existing_maps = glob.glob(args.save_path + "/*")
+    existing_maps = [m.split("/")[-1] for m in existing_maps]
 
     print("\nRunning occlusion experiment")
     print("# Instances: {}".format(n))
     print("Patch size: {}".format(patch_size))
     print("Stride: {}".format(stride))
-    print("Number of maps: {}".format(len(maps)))
+    print("Number of maps: {}".format(len(existing_maps)))
 
     for i in range(n):
 
@@ -107,29 +120,50 @@ def do_occlusion_experiment(model, dataset, pixel_dict, device, args):
 
         print(i,name,len(water_pixels),len(land_pixels),len(coastline_pixels),len(fp_pixels),len(fn_pixels))
 
-        # Do occlusion for masks
+        # Potential masks
         masks = [water_mask, land_mask, coastline_mask, fp_mask, fn_mask]
         pixel_lists = [water_pixels, land_pixels, coastline_pixels, fp_pixels, fn_pixels]
-        types = ["water", "land", "coastline", "fp", "fn"]
+        pixel_types = ["water", "land", "coastline", "fp", "fn"]
 
-        for mask, mask_type in tqdm(zip(masks, types)):
-            save_name = f"{name}_mask_{mask_type}_{patch_size}_{stride}.npy"
-            if save_name in maps:
+        # Filter out maps that have already been created
+        masks_for_occlusion = []
+        meta_data = []
+        for mask, pixel_type in zip(masks,pixel_types):
+            if check_map_exists(existing_maps,name,"mask", pixel_type, patch_size, stride):
                 continue
 
-            map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
-            np.save(os.path.join(args.save_path, save_name), map)
+            masks_for_occlusion.append(mask)
+            meta_data.append({"type": "mask", "pixel_type": pixel_type, "patch_size": patch_size, "stride": stride})
 
-        # Do occlusion for pixels
-        for pixel_list, pixel_type in tqdm(zip(pixel_lists, types)):
+        for pixel_list, pixel_type in zip(pixel_lists, pixel_types):
             for pixel in pixel_list:
-                save_name = f"{name}_pixel_{pixel_type}_{pixel[0]}_{pixel[1]}_{patch_size}_{stride}.npy"
-                if save_name in maps:
+                if check_map_exists(existing_maps,name,"pixel", pixel_type, patch_size, stride, pixel):
                     continue
+                pixel_mask = mask_from_pixel(water_mask, pixel) # use water mask as it is the same size as the image
+                masks_for_occlusion.append(pixel_mask)
+                meta_data.append({"type": "pixel", "pixel_type": pixel_type, "pixel": pixel, "patch_size": patch_size, "stride": stride})
 
-                mask = mask_from_pixel(water_mask, pixel) # only the dimensions of mask matter
-                map = generate_occlusion_map(model, device, bands, mask=mask, patch_size=patch_size, stride=stride)
-                np.save(os.path.join(args.save_path, save_name), map)
+
+        if len(masks_for_occlusion) > 0:
+            maps = generate_occlusion_maps(model, 
+                                           device, 
+                                           bands, 
+                                           masks=masks_for_occlusion, 
+                                           patch_size=patch_size, 
+                                           stride=stride)
+            
+            assert len(maps) == len(masks_for_occlusion)
+        
+        else:
+            print("All maps generated")
+
+        # Save the maps
+        for i, meta in enumerate(meta_data):
+            if meta["type"] == "mask":
+                save_name = f"{name}_{meta['type']}_{meta['pixel_type']}_{meta['patch_size']}_{meta['stride']}.npy"
+            elif meta["type"] == "pixel":
+                save_name = f"{name}_{meta['type']}_{meta['pixel_type']}_{meta['pixel'][0]}_{meta['pixel'][1]}_{meta['patch_size']}_{meta['stride']}.npy"
+            np.save(os.path.join(args.save_path, save_name), maps[i])
 
         if args.test:
             break
@@ -141,29 +175,33 @@ def mask_from_pixel(mask, pixel):
 
     return mask
 
-def generate_occlusion_map(model, device, input_image, mask=None, patch_size=5, stride=1):
+def generate_occlusion_maps(model, device, input_image, masks, patch_size=5, stride=1):
     """
-    Generate an occlusion map for a given image input and specified mask region.
+    Generate occlusion maps for a given image input and specified list of mask regions.
 
     Args:
     - model (torch.nn.Module): Pre-trained segmentation model.
     - input_image (torch.Tensor): Input image tensor of shape (C, H, W).
-    - mask (torch.Tensor): Mask of shape (H, W), with 1s for pixels to analyze, 0s elsewhere.
+    - masks (list of torch.Tensor): List of masks, each of shape (H, W), 
+      with 1s for pixels to analyze, 0s elsewhere.
     - patch_size (int): The size of the occlusion patch.
     - stride (int): Stride for moving the occlusion patch across the image.
 
     Returns:
-    - occlusion_map (np.array): Heatmap of occlusion influence for the masked region.
+    - occlusion_maps (list of np.array): List of heatmaps of occlusion influence, one per mask.
     """
 
     # Ensure input image and model are on the same device
     input_image = input_image.to(device).unsqueeze(0)  # add batch dimension
+
     original_pred = model(input_image).squeeze(0)  # model prediction on original image
     original_pred = original_pred.cpu().detach().numpy()
-    original_masked_pred = original_pred * mask  # Apply mask to the output
+    
+    # Apply each mask to the original prediction
+    original_masked_preds = [original_pred * mask for mask in masks]
 
-    # Initialize occlusion map
-    occlusion_map = np.zeros(input_image.shape[2:])
+    # Initialize occlusion maps for each mask
+    occlusion_maps = [np.zeros(input_image.shape[2:]) for _ in masks]
 
     # Iterate over image in patches
     for y in range(0, input_image.shape[2] - patch_size + 1, stride):
@@ -177,14 +215,19 @@ def generate_occlusion_map(model, device, input_image, mask=None, patch_size=5, 
                 occluded_pred = model(occluded_image).squeeze(0)
                 occluded_pred = occluded_pred.cpu().detach().numpy()
 
-            # Calculate difference in predictions for the masked region
-            occlusion_influence = np.abs(original_masked_pred - (occluded_pred * mask)).sum().item()
-            occlusion_map[y:y + patch_size, x:x + patch_size] += occlusion_influence
+            # Calculate occlusion influence for each mask
+            for i, mask in enumerate(masks):
+                occluded_masked_pred = occluded_pred * mask
+                occlusion_influence = np.abs(original_masked_preds[i] - occluded_masked_pred).sum().item()
+                occlusion_maps[i][y:y + patch_size, x:x + patch_size] += occlusion_influence
 
-    # Normalize occlusion map to [0, 1]
-    occlusion_map = (occlusion_map - np.min(occlusion_map)) / (np.max(occlusion_map) - np.min(occlusion_map))
+    # Normalize each occlusion map to [0, 1]
+    for i in range(len(occlusion_maps)):
+        occlusion_maps[i] = (occlusion_maps[i] - np.min(occlusion_maps[i])) / (
+            np.max(occlusion_maps[i]) - np.min(occlusion_maps[i])
+        )
 
-    return occlusion_map
+    return occlusion_maps
 
 
 if __name__ == "__main__":
