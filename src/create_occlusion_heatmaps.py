@@ -28,6 +28,7 @@ def main():
 
     parser.add_argument("--patch_size",type=int,default=8,help="Patch size for occlusion",)
     parser.add_argument("--stride",type=int,default=1,help="Stride for occlusion",)
+    parser.add_argument("--method",type=str,default="zero",choices=["zero", "mean","random"],help="Method for occlusion",)
 
     parser.add_argument("--data_path",type=str,default="../../data/LICS/test",help="Path to the training data",)
     parser.add_argument("--save_path",type=str,default="../maps",help="Path template for saving the model",)
@@ -149,6 +150,7 @@ def do_occlusion_experiment(model, dataset, pixel_dict, device, args):
                                            device, 
                                            bands, 
                                            masks=masks_for_occlusion, 
+                                            method=args.method,
                                            patch_size=patch_size, 
                                            stride=stride)
             
@@ -175,7 +177,7 @@ def mask_from_pixel(mask, pixel):
 
     return mask
 
-def generate_occlusion_maps(model, device, input_image, masks, patch_size=5, stride=1):
+def generate_occlusion_maps(model, device, input_image, masks,method='zero', patch_size=5, stride=1):
     """
     Generate occlusion maps for a given image input and specified list of mask regions.
 
@@ -193,6 +195,7 @@ def generate_occlusion_maps(model, device, input_image, masks, patch_size=5, str
 
     # Ensure input image and model are on the same device
     input_image = input_image.to(device).unsqueeze(0)  # add batch dimension
+    n_channels, height, width = input_image.shape[1:]
 
     original_pred = model(input_image).squeeze(0)  # model prediction on original image
     original_pred = original_pred.cpu().detach().numpy()
@@ -203,12 +206,38 @@ def generate_occlusion_maps(model, device, input_image, masks, patch_size=5, str
     # Initialize occlusion maps for each mask
     occlusion_maps = [np.zeros(input_image.shape[2:]) for _ in masks]
 
+    # Calculate occlusion value
+    if method == 'zero':
+        occlusion_value = 0
+        print("Occlusion value: {}".format(occlusion_value))
+
+    elif method == 'mean':
+    
+        occlusion_values = input_image.mean(dim=(2, 3)) # mean of each channel
+        occlusion_patch = torch.zeros((1,n_channels,patch_size,patch_size))
+        occlusion_patch[:, :, :patch_size, :patch_size] = occlusion_values[:, :, None, None]
+
+        print("Occlusion values: {}".format(np.round(occlusion_values.cpu().detach().numpy(),2)))
+    
+    elif method == 'random':
+
+        occlusion_values = torch.rand((1,n_channels,1,1))# get random value from each channel
+        occlusion_patch = torch.zeros((1,n_channels,patch_size,patch_size))
+        occlusion_patch += occlusion_values
+
+        print("Occlusion values: {}".format(np.round(occlusion_values.cpu().detach().numpy(),2)))
+
+    
+
     # Iterate over image in patches
     for y in range(0, input_image.shape[2] - patch_size + 1, stride):
         for x in range(0, input_image.shape[3] - patch_size + 1, stride):
             # Clone and occlude a patch in the input image
             occluded_image = deepcopy(input_image)
-            occluded_image[:, :, y:y + patch_size, x:x + patch_size] = 0  # occlude with zeros
+            if method == 'zero':
+                occluded_image[:, :, y:y + patch_size, x:x + patch_size] = occlusion_value
+            else:
+                occluded_image[:, :, y:y + patch_size, x:x + patch_size] = occlusion_patch
 
             # Get prediction for the occluded image
             with torch.no_grad():
