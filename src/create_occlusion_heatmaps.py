@@ -96,6 +96,7 @@ def do_occlusion_experiment(model, dataset, pixel_dict, device, args):
     print("Patch size: {}".format(patch_size))
     print("Stride: {}".format(stride))
     print("Number of maps: {}".format(len(existing_maps)))
+    print("Method: {}".format(args.method))
 
     for i in range(n):
 
