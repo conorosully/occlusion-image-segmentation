@@ -1,3 +1,5 @@
+# Create occlusion heatmaps for a segmentation model
+
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt

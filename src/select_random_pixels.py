@@ -1,3 +1,5 @@
+# Select random pixels for occlusion experiment
+
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,6 +17,8 @@ from datasets import SegmentationDataset
 import json
 
 import utils
+
+
 
 def main():
 
