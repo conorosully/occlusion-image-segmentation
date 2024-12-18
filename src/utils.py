@@ -155,7 +155,19 @@ def calc_weighted_context(pixel,heatmap):
 
     return weighted_context, normalized_weighted_context
 
-def occlusion_visualisation(background, map, alpha=0.5,threshold = None, use_rgb=True):
+def edge_from_mask(mask):
+    """Get edge map from mask"""
+
+    dy, dx = np.gradient(mask)
+    grad = np.abs(dx) + np.abs(dy)
+    edge = np.array([grad > 0])[0]
+    edge = edge.astype(np.uint8)
+
+
+
+    return edge
+
+def occlusion_visualisation(background, map, alpha=0.5,threshold = None, use_rgb=True,edge_threshold = None):
     """Overlay the occlusion map on the background image.
     
     Args:
@@ -164,6 +176,8 @@ def occlusion_visualisation(background, map, alpha=0.5,threshold = None, use_rgb
         alpha (float): The transparency of the occlusion map.
         threshold (float): The threshold for the occlusion map.
         use_rgb (bool): Whether to convert the heatmap to RGB.
+        edge_threshold (float): The threshold for the edge map.
+
         
     Returns:
         np.array: The visualization.
@@ -198,6 +212,16 @@ def occlusion_visualisation(background, map, alpha=0.5,threshold = None, use_rgb
 
     else:
         overlay = cv2.addWeighted(heatmap, alpha, background, 1 - alpha, 0)
+
+    if edge_threshold is not None:
+
+        # get edge of occlusion map
+        map_mask = np.zeros_like(map)
+        map_mask[map > edge_threshold] = 1
+        map_edge = edge_from_mask(map_mask)
+
+        # add edge to background
+        overlay[map_edge == 1] = 0
     
     return overlay
 
